@@ -1,0 +1,26 @@
+version: '2'
+services:
+
+  comments:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - '.:/opt/comments/'
+    command:
+      - 'dockerize'
+      - '-wait'
+      - 'tcp://db:5432'
+      - 'python'
+      - 'core/main.py'
+    depends_on:
+      - db
+
+  db:
+    build: db
+    ports:
+      - '5432:5432'
+    environment:
+      POSTGRES_USER: exness
+      POSTGRES_PASSWORD: exness
+      POSTGRES_DB: comments_db

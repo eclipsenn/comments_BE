@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+<head lang="en">
+    <meta charset="UTF-8">
+    <title></title>
+</head>
+<body>
+<h1> Search history</h1>
+    {% for s in searches%}
+        <form method="POST">
+            <input type="submit" value="Download">
+            <input type="hidden" value="{{s.search_date}}" name="search_date" />
+            <input type="hidden" value="{{s.start_date}}" name="start_date" />
+            <input type="hidden" value="{{s.end_date}}" name="end_date" />
+            <input type="hidden" value={{s.root_comment_id}} name="root_comment_id" />
+            your search at {{s.search_date}} | start_date = {{s.start_date}} |
+            end date = {{s.end_date}} | root = {{s.root_comment_id}}
+        </form>
+    {%endfor%}
+</body>
+</html>
