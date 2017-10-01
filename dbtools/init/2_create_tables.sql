@@ -17,7 +17,7 @@
 --SET ROLE 'dmishin';
 
 DROP TYPE IF EXISTS ancestor_type CASCADE;
-CREATE TYPE ancestor_type AS ENUM('post', 'comment');
+CREATE TYPE ancestor_type AS ENUM('post', 'comment', 'page');
 DROP TYPE IF EXISTS action_type CASCADE;
 CREATE TYPE action_type AS ENUM('create', 'update', 'delete', 'restore');
 
@@ -61,9 +61,22 @@ CREATE TABLE "history" (
     "text" varchar
 );
 
+DROP VIEW IF EXISTS comments;
 CREATE VIEW comments AS
   SELECT * from entities
     WHERE type='comment';
+
+
+DROP VIEW IF EXISTS posts;
+CREATE VIEW comments AS
+  SELECT * from entities
+    WHERE type='post';
+
+
+DROP VIEW IF EXISTS pages;
+CREATE VIEW comments AS
+  SELECT * from entities
+    WHERE type='page';
 
 
 CREATE OR REPLACE function create_comment_to_history() RETURNS TRIGGER
