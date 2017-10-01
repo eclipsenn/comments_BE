@@ -6,12 +6,13 @@ aiopg SELECT operation returns `list` of results
 https://github.com/aio-libs/aiopg/blob/master/aiopg/sa/result.py#L366
 which might cost much memory, use it carefully.
 """
+# TODO: db injection handling
 
 from datetime import datetime
 
 import aiopg.sa
 
-# TODO: ORM is not implemented but quite possible to be
+# ORM is not implemented but quite possible to be
 # Example below is based on SQLAlchemy ORM
 
 # import sqlalchemy as sa
@@ -50,7 +51,7 @@ import aiopg.sa
 #     __tablename__ = 'posts'
 #
 #     id = sa.Column(sa.Integer, sa.ForeignKey('entities.id'), primary_key=True)
-#     ancestor_id = sa.Column(sa.Integer(), sa.CheckConstraint('ancestor_id is NULL'))
+#     parent_id = sa.Column(sa.Integer(), sa.CheckConstraint('parent_id is NULL'))
 #     #type = sa.Column(entity_types, sa.CheckConstraint('type = post'))
 #     __mapper_args__ = {
 #         'polymorphic_identity': 'post',
@@ -61,7 +62,7 @@ import aiopg.sa
 #     __tablename__ = 'comments'
 #
 #     id = sa.Column(sa.Integer, sa.ForeignKey('entities.id'), primary_key=True)
-#     ancestor_id = sa.Column(sa.Integer())
+#     parent_id = sa.Column(sa.Integer())
 #     #type = sa.Column(entity_types, sa.CheckConstraint('type = comment'))
 #     __mapper_args__ = {
 #         'polymorphic_identity': 'comment',
@@ -83,7 +84,7 @@ import aiopg.sa
 #     sa.Column('date_created', sa.DateTime(timezone=True), default=datetime.now()),
 #     sa.Column('date_last_modified', sa.DateTime(timezone=True), default=datetime.now()),
 #     sa.Column('text', sa.String(), nullable=False),
-#     sa.Column('ancestor_id', sa.Integer()),
+#     sa.Column('parent_id', sa.Integer()),
 # )
 #
 # comments = sa.Table(
@@ -94,7 +95,7 @@ import aiopg.sa
 #     sa.Column('date_created', sa.DateTime(timezone=True), default=datetime.now()),
 #     sa.Column('date_last_modified', sa.DateTime(timezone=True), default=datetime.now()),
 #     sa.Column('text', sa.ForeignKey(entities.c.text, ondelete='CASCADE'), nullable=False),
-#     sa.Column('ancestor_id', sa.Integer(), nullable=False),
+#     sa.Column('parent_id', sa.Integer(), nullable=False),
 # )
 
 
@@ -107,6 +108,7 @@ class ExecuteException(Exception):
 
 
 async def init_pg(app, env='dev'):
+    """Init an app with aiopg engine."""
     conf = app['config'][env]['postgres']
     engine = await aiopg.sa.create_engine(
         database=conf['database'],
@@ -121,18 +123,20 @@ async def init_pg(app, env='dev'):
 
 
 async def close_pg(app):
+    """Close the aiopg engine for the app."""
     app['db'].close()
     await app['db'].wait_closed()
 
 
 async def db_get_comments(conn, username):
-    # result = await conn.execute(
-    #     comments.select().where(comments.c.creator == username)
-    # )
+    """Get all the comments for a given user."""
     result = await conn.execute(
-        "SELECT DISTINCT ON(id) "
-        "* FROM comments, users "
-        "WHERE comments.creator = '{}'".format(username)
+        """
+        SELECT DISTINCT ON(id) *
+        FROM comments, users 
+        WHERE comments.creator = %s
+        """,
+        (username,)
     )
 
     comments_record = await result.fetchall()
@@ -143,14 +147,12 @@ async def db_get_comments(conn, username):
 
 
 async def db_create_comment(conn, username, text, entity_id):
+    """Create a new comment for a given entity."""
     try:
-        result = await conn.execute(
-            "INSERT INTO comments (type,creator, user_last_modified, text,ancestor_id)"
-            "VALUES ('comment', '{username}', '{username}',  '{text}', '{ancestor_id}');".format(
-                username=username,
-                text=text,
-                ancestor_id=entity_id
-            )
+        await conn.execute(
+            "INSERT INTO comments (type, creator, user_last_modified, text, parent_id)"
+            "VALUES ('comment', %s, %s, %s, %s);",
+            (username, username, text, entity_id)
         )
     except:
         res = await conn.execute(
@@ -161,14 +163,17 @@ async def db_create_comment(conn, username, text, entity_id):
             'Failed to create the new comment, probably incorrect entity was provided.\n'
             '10 valid entities:\n{}'.format(' '.join(str(e.id) for e in entities))
         )
-    return result
-
 
 
 async def db_get_1lvl_comments(conn, entity_id, offset=0, limit=5):
+    """
+    Get all first-level children for the given entity,
+
+    Uses pagination, so expects an offset and a limit.
+    """
     result = await conn.execute(
         """
-        SELECT * FROM comments WHERE ancestor_id = %s
+        SELECT * FROM comments WHERE parent_id = %s
         OFFSET %s LIMIT %s
 
         """,
@@ -183,9 +188,12 @@ async def db_get_1lvl_comments(conn, entity_id, offset=0, limit=5):
 
 async def db_change_comment(conn, user, comment_id, text):
     result = await conn.execute(
-        "UPDATE comments "
-        "SET text='{text}', date_last_modified = '{date}', user_last_modified='{user}' "
-        "WHERE id='{id}'".format(text=text, date=datetime.now(), id=comment_id, user=user)
+        """
+        UPDATE comments
+        SET text=%s, date_last_modified = %s, user_last_modified=%s
+        WHERE id=%s
+        """,
+        (text, datetime.now(), user, comment_id)
     )
     try:
         return result
@@ -202,9 +210,11 @@ async def db_delete_comment(conn, user, comment_id):
     """
     # TODO cant delete if there're children
     result = await conn.execute(
-        "UPDATE comments "
-        "SET text=DEFAULT, date_last_modified = '{date}', user_last_modified='{user}' "
-        "WHERE id='{id}'".format(date=datetime.now(), id=comment_id, user=user)
+        """
+        UPDATE comments
+        SET text=DEFAULT, date_last_modified = %s, user_last_modified=%s
+        WHERE id=%s""",
+        (datetime.now(), user, comment_id)
     )
     try:
         return result
@@ -212,23 +222,16 @@ async def db_delete_comment(conn, user, comment_id):
         raise ExecuteException('Failed to delete the comment')
 
 
-async def db_get_child_comments(conn, entity_id, with_root=False):
-    source = 'entities' if with_root else 'comments'
-    column = 'id' if with_root else 'ancestor_id'
-    result = await conn.execute("""
-        WITH RECURSIVE r as (
-            SELECT id, creator, date_created, date_last_modified, text, ancestor_id
-            FROM {source}
-            WHERE "{column}"='{entity_id}'
-
-            UNION
-
-            SELECT comments.id, comments.creator, comments.date_created,
-            comments.date_last_modified, comments.text, comments.ancestor_id
-            FROM r JOIN comments on comments.ancestor_id = r.id
-        )
-        SELECT * FROM r;
-    """.format(source=source, column=column, entity_id=entity_id))
+async def db_get_child_comments(conn, entity_id):
+    """Get a list of children comments for a given entity."""
+    result = await conn.execute(
+        """
+        SELECT S.id, S.creator, S.date_created, S.date_last_modified, S.text, S.parent_id
+        FROM comments as S JOIN entities_closure_table as CT on S.id = CT.descendant_id 
+        WHERE CT.ancestor_id=%s AND CT.descendant_id !=%s;
+        """,
+        (entity_id, entity_id)
+    )
     comments_record = await result.fetchall()
     if comments_record:
         return comments_record
@@ -236,12 +239,38 @@ async def db_get_child_comments(conn, entity_id, with_root=False):
         raise RecordNotFound('No comments found for entity {}'.format(entity_id))
 
 
-async def db_get_deleted_text(conn, user, entity_id):
+async def db_get_full_tree(conn, root_id):
+    """Get a full tree of comments for a given root."""
     result = await conn.execute(
-        """SELECT * FROM history
-        WHERE entity_id='{entity_id}' AND action='delete' --and "user"='{user}' TODO add and test
-        ORDER BY date DESC limit 1""".format(
-            user=user, entity_id=entity_id)
+        """
+        SELECT S.id, S.creator, S.date_created, S.date_last_modified, S.text, S.parent_id
+        FROM entities as S JOIN entities_closure_table as CT on S.id = CT.descendant_id 
+        WHERE CT.ancestor_id=%s;
+        """,
+        (root_id,)
+    )
+    comments_record = await result.fetchall()
+    if comments_record:
+        return comments_record
+    else:
+        raise RecordNotFound('No tree found for root {}'.format(root_id))
+
+
+
+async def db_get_deleted_text(conn, user, entity_id):
+    """
+    Get removed text for a given entity.
+
+    Since comments are not essentially removed(only test),
+    it's possible to get text to restore later.
+    """
+    result = await conn.execute(
+        """
+        SELECT * FROM history
+        WHERE entity_id=%s AND action='delete' --and "user"=%s TODO add and test
+        ORDER BY date DESC limit 1
+        """,
+        (user, entity_id)
     )
     record = await result.first()
     if record:
@@ -290,59 +319,3 @@ async def db_get_search_history(conn, user):
     if not records:
         raise RecordNotFound
     return records
-
-
-### test code """"""""""""""""""""""""""""""""""""
-async def db_get_left_sibling(conn, entity):
-    """Get the left sibling of the given entity, defaults to None."""
-    result = await conn.execute(
-        "SELECT * FROM comments"
-        "WHERE comments.right + 1 = %s",
-        (entity.right,)
-    )
-    records = await result.fetchall()
-    if not records:
-        return None
-    elif len(records) > 1:
-        raise ExecuteException('More than one left sibling was returned.')
-    else:
-        return records[0]
-
-
-
-async def db_create_comment_v2(conn, username, text, entity_id):
-    """
-    Insert a new comment.
-
-    Since the nested-sets structure is used,
-    needs to insert left and right, which costs us a lot of inserts.
-    In order to prevent this, the optimisation was used as described
-    below:
-     - if entity has parent, then
-      -- if parent.right - parent.left < 0.01 * MAX_EXPECTED_COMMENTS_FOR_ENTITY
-         then REORDER_STRUCTURE;
-      -- else left=parent.left+1, right=parent.right-1
-     - if there's a left sibling, 
-       then left=sibling.right+1, right=MAX_EXPECTED_COMMENTS_FOR_ENTITY;
-     - else left=0 and right=MAX_EXPECTED_COMMENTS_FOR_ENTITY;
-    """
-    try:
-        result = await conn.execute(
-            "INSERT INTO comments (type,creator, user_last_modified, text,ancestor_id)"
-            "VALUES ('comment', '{username}', '{username}',  '{text}', '{ancestor_id}');".format(
-                username=username,
-                text=text,
-                ancestor_id=entity_id
-            )
-        )
-    except:
-        res = await conn.execute(
-            'SELECT * from entities limit 10'
-        )
-        entities = await res.fetchall()
-        raise ExecuteException(
-            'Failed to create the new comment, probably incorrect entity was provided.\n'
-            '10 valid entities:\n{}'.format(
-                ' '.join(str(e.id) for e in entities))
-        )
-    return result

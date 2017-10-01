@@ -28,6 +28,7 @@ CREATE TABLE "users" (
     "second_name" varchar(100) NOT NULL
 );
 
+
 DROP TABLE IF EXISTS entities CASCADE;
 CREATE TABLE "entities" (
     "id" serial PRIMARY KEY,
@@ -37,9 +38,18 @@ CREATE TABLE "entities" (
     "date_last_modified" TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     "user_last_modified" varchar(100) NOT NULL REFERENCES "users"("username"),
     "text" varchar,
-    "ancestor_id" INTEGER REFERENCES "entities" ("id"),
-    "root_entity_id" INTEGER REFERENCES "entities" ("id")
+    "parent_id" INTEGER REFERENCES "entities" ("id")
 );
+
+
+DROP TABLE IF EXISTS entities_closure_table CASCADE;
+CREATE TABLE entities_closure_table (
+    "id" serial PRIMARY KEY,
+    "ancestor_id" INTEGER REFERENCES "entities"("id"),
+    "descendant_id" INTEGER REFERENCES "entities"("id")
+);
+
+
 
 DROP TABLE IF EXISTS history CASCADE;
 CREATE TABLE "history" (
@@ -56,7 +66,7 @@ CREATE VIEW comments AS
     WHERE type='comment';
 
 
-CREATE OR REPLACE function create_comment() RETURNS TRIGGER
+CREATE OR REPLACE function create_comment_to_history() RETURNS TRIGGER
   AS $$
     BEGIN
       INSERT INTO history ("entity_id", "user", "action", "date", "text")
@@ -66,9 +76,28 @@ CREATE OR REPLACE function create_comment() RETURNS TRIGGER
   $$ LANGUAGE plpgsql;
 
 
-DROP TRIGGER IF EXISTS tr_create_comment ON entities;
-CREATE TRIGGER tr_create_comment AFTER INSERT ON entities
-  FOR EACH ROW EXECUTE PROCEDURE create_comment();
+DROP TRIGGER IF EXISTS tr_create_comment_to_history ON entities;
+CREATE TRIGGER tr_create_comment_to_history AFTER INSERT ON entities
+  FOR EACH ROW EXECUTE PROCEDURE create_comment_to_history();
+
+
+CREATE OR REPLACE function create_comment_to_closure() RETURNS TRIGGER
+  AS $$
+    BEGIN
+      INSERT INTO entities_closure_table ("ancestor_id", "descendant_id")
+        SELECT ancestor_id, NEW.id
+        FROM entities_closure_table as ect
+        WHERE ect.descendant_id = NEW.parent_id
+        UNION ALL
+        SELECT NEW.id, NEW.id;
+      RETURN NEW;
+    END
+  $$ LANGUAGE plpgsql;
+
+
+DROP TRIGGER IF EXISTS tr_create_comment_to_closure ON entities;
+CREATE TRIGGER tr_create_comment_to_closure AFTER INSERT ON entities
+  FOR EACH ROW EXECUTE PROCEDURE create_comment_to_closure();
 
 
 CREATE OR REPLACE function update_comment() RETURNS TRIGGER

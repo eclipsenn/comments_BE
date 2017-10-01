@@ -105,18 +105,6 @@ async def test_db_get_child_comments(conn, init_a_few_db_entries):
 
 
 @pytest.mark.asyncio
-async def test_db_get_child_comments_with_root(conn, init_a_few_db_entries):
-    """ Test that all child comments get returned, including root one."""
-    comments = await db_get_child_comments(conn, 3, with_root=True)
-    comment_texts = [c.text for c in comments]
-    assert (
-
-        'new comment by dima' in comment_texts and
-        'dima commented some comment' in comment_texts
-    )
-
-
-@pytest.mark.asyncio
 async def test_db_get_child_comments_not_found(conn, init_a_few_db_entries):
     """
     Test that RecordNotFound is raised
@@ -125,6 +113,18 @@ async def test_db_get_child_comments_not_found(conn, init_a_few_db_entries):
     """
     with pytest.raises(RecordNotFound):
         await db_get_child_comments(conn, 5)
+
+
+@pytest.mark.asyncio
+async def test_db_get_full_tree(conn, init_a_few_db_entries):
+    """"""
+    assert 0
+
+
+@pytest.mark.asyncio
+async def test_db_get_full_tree_not_found(conn, init_a_few_db_entries):
+    """"""
+    assert 0
 
 
 @pytest.mark.asyncio

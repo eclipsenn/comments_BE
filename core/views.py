@@ -1,3 +1,8 @@
+"""Module to represent a list if views."""
+# TODO: different history formats
+# TODO: edge cases handling
+# TODO: switch to namedtuple
+
 from datetime import datetime
 from math import ceil
 import json
@@ -9,20 +14,14 @@ import aiohttp_jinja2
 from db import *
 
 
-# TODO: different formats
-# TODO: db injection handling
-# TODO: docstrings
-# TODO: edge cases handling
-# TODO: switch to namedtuple
-
 class Comment:
-    def __init__(self, comment_id, ancestor_id, text):
+    def __init__(self, comment_id, parent_id, text):
         self.id = comment_id
-        self.ancestor_id = ancestor_id
+        self.parent_id = parent_id
         self.text = text
 
     def __repr__(self):
-        return '(id={}, parent={},text={})'.format(self.id, self.ancestor_id, self.text)
+        return '(id={}, parent={},text={})'.format(self.id, self.parent_id, self.text)
 
 
 class Search:
@@ -31,31 +30,6 @@ class Search:
         self.start_date = start_date
         self.end_date = end_date
         self.root_comment_id = root_comment_id
-
-
-def compose_comment_tree(comments):
-    """
-    Compose a dict for the given list of comments
-
-    :param comments: tuple of (id, user, create_time, changed_time, text, parent_id)
-    :return: dict {parent_id : [child_ids]}, where child_ids are also dicts.
-    """
-    # TODO: can be faster than O(n^2) ?
-    cs = list(Comment(c.id, c.ancestor_id, c.text) for c in comments)
-    tmp = {}
-    for c in cs[::-1]:
-        keys = list(tmp.keys())
-        changed = False
-        for child in keys[:]:
-            if c.id == child.ancestor_id:
-                changed = True
-                if c not in tmp:
-                    tmp[c] = {}
-                tmp[c][child] = tmp[child]
-                del tmp[child]
-        if not changed:
-            tmp[c] = {}
-    return tmp
 
 
 @aiohttp_jinja2.template('index.html')
@@ -224,19 +198,33 @@ async def restore_comment(request):
 async def get_child_comments(request):
     """Get child comments tree for the given comment ID."""
     entity_id = request.rel_url.query.get('entity_id')
-    with_root = 'true' == request.rel_url.query.get('with_root')
     if not entity_id:
         raise web.HTTPBadRequest(text='ancestor entity id is missing')
     async with request.app['db'].acquire() as conn:
         try:
-            comments = await db_get_child_comments(conn, entity_id, with_root)
+            comments = await db_get_child_comments(conn, entity_id)
         except ExecuteException as e:
             raise web.HTTPInternalServerError(text=str(e))
         except RecordNotFound as e:
             raise web.HTTPNotFound(text=str(e))
 
-        data = compose_comment_tree(comments)
-        return web.json_response(data=data.__repr__())
+        return web.json_response(text=json.dumps(comments.__repr__()))
+
+
+async def get_full_tree(request):
+    """Get child comments tree for the given comment ID."""
+    root_id = request.rel_url.query.get('root_id')
+    if not root_id:
+        raise web.HTTPBadRequest(text='root_id is missing')
+    async with request.app['db'].acquire() as conn:
+        try:
+            comments = await db_get_full_tree(conn, root_id)
+        except ExecuteException as e:
+            raise web.HTTPInternalServerError(text=str(e))
+        except RecordNotFound as e:
+            raise web.HTTPNotFound(text=str(e))
+
+        return web.json_response(text=json.dumps(comments.__repr__()))
 
 
 async def get_history(request):
