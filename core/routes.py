@@ -17,5 +17,5 @@ def setup_routes(app):
     app.router.add_get('/{user}/get_full_tree', get_full_tree)
     app.router.add_get('/{user}/get_history', get_history_form)
     app.router.add_post('/{user}/get_history', get_history)
-    app.router.add_get('/{user}/search_history', show_search_history)
+    app.router.add_get('/{user}/search_history', get_search_history)
     app.router.add_post('/{user}/search_history', get_history)

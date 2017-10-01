@@ -2,6 +2,7 @@ SQLAlchemy
 aiofiles
 aiopg
 aiohttp_jinja2
+lxml
 pytest
 pytest-aiohttp
 pytest-asyncio

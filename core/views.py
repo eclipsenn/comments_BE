@@ -1,35 +1,18 @@
 """Module to represent a list if views."""
-# TODO: different history formats
-# TODO: edge cases handling
-# TODO: switch to namedtuple
 
-from datetime import datetime
+from collections import namedtuple
 from math import ceil
 import json
-import xml
 
+from lxml import etree
 from aiohttp import web
 import aiohttp_jinja2
 
 from db import *
 
 
-class Comment:
-    def __init__(self, comment_id, parent_id, text):
-        self.id = comment_id
-        self.parent_id = parent_id
-        self.text = text
-
-    def __repr__(self):
-        return '(id={}, parent={},text={})'.format(self.id, self.parent_id, self.text)
-
-
-class Search:
-    def __init__(self, search_date=None, start_date=None, end_date=None, root_comment_id=None):
-        self.search_date = search_date
-        self.start_date = start_date
-        self.end_date = end_date
-        self.root_comment_id = root_comment_id
+Search = namedtuple('Search', ('search_date', 'start_date', 'end_date', 'root_comment_id'))
+Action = namedtuple('Action', ('entity_id', 'user', 'action', 'date', 'text'))
 
 
 @aiohttp_jinja2.template('index.html')
@@ -159,8 +142,11 @@ async def delete_comment(request):
     if not comment_id:
         raise web.HTTPBadRequest(text='comment id is missing')
     async with request.app['db'].acquire() as conn:
-        children = await db_get_1lvl_comments(conn, comment_id)
-        if children:
+        try:
+            await db_get_1lvl_comments(conn, comment_id)
+        except RecordNotFound:
+            pass
+        else:
             return web.HTTPBadRequest(text='Cannot delete if the comment has children')
         try:
             await db_delete_comment(conn, user, comment_id)
@@ -186,7 +172,7 @@ async def restore_comment(request):
     async with request.app['db'].acquire() as conn:
         try:
             text = await db_get_deleted_text(conn, user, comment_id)
-            await db_change_comment(conn, user, comment_id, text.text)
+            await db_change_comment(conn, user, comment_id, text)
         except (RecordNotFound, ExecuteException) as e:
             raise web.HTTPInternalServerError(text=str(e))
         return web.Response(
@@ -227,6 +213,17 @@ async def get_full_tree(request):
         return web.json_response(text=json.dumps(comments.__repr__()))
 
 
+def compose_history_in_xml(actions):
+    """Compose xml output for the given history."""
+    root = etree.Element('Actions')
+    for action in actions:
+        e_action = etree.SubElement(root, 'Action')
+        for attr, val in action.items():
+            sub = etree.SubElement(e_action, attr)
+            sub.text = str(val)
+    return etree.tostring(root, encoding='unicode')
+
+
 async def get_history(request):
     """
     Return xml file with the history of comments.
@@ -237,6 +234,7 @@ async def get_history(request):
     data = await request.post()
     user = request.match_info['user']
     root_comment_id = data.get('comment_id') or None
+    download_format = data['download_format']
     start_date = data.get('start_date')
     if start_date in ('', 'None'):
         start_date = None
@@ -248,11 +246,28 @@ async def get_history(request):
             result = await db_get_history(conn, user, start_date, end_date, root_comment_id)
     except RecordNotFound as e:
         return web.Response(text=str(e))
+    actions = [
+        Action(
+            a.entity_id,
+            a.user,
+            a.action,
+            a.date.strftime('%Y-%m-%d %H:%M:%S'),
+            a.text
+        )._asdict() for a in result
+    ]
+    if download_format == 'json':
+        output = json.dumps(actions)
+    elif download_format == 'xml':
+        output = compose_history_in_xml(actions)
+    else:
+        raise Exception('unsupported format {}'.format(download_format))
+    filename = '{}_history.{}'.format(user, download_format)
+
     res = web.Response(
-        body=bytes(json.dumps(result.__repr__()), encoding='utf8'),
+        text=output,
         headers={
             'Content-Type': 'application/octet-stream',
-            'Content-Disposition': 'attachment',
+            'Content-Disposition': 'attachment; filename={}'.format(filename),
         }
     )
     await res.prepare(request)
@@ -260,7 +275,7 @@ async def get_history(request):
 
 
 @aiohttp_jinja2.template('history.html')
-async def show_search_history(request):
+async def get_search_history(request):
     """
     Show the list of previous searches.
 
@@ -268,9 +283,12 @@ async def show_search_history(request):
     """
     user = request.match_info['user']
     async with request.app['db'].acquire() as conn:
-        result = await db_get_search_history(conn, user)
-    searches = [
-        Search(res.search_date, res.start_date, res.end_date, res.root_comment_id)
-        for res in result
-    ]
-    return {'searches': searches}
+        try:
+            result = await db_get_search_history(conn, user)
+        except RecordNotFound as e:
+            raise web.HTTPNotFound(text=str(e))
+        searches = [
+            Search(res.search_date, res.start_date, res.end_date, res.root_comment_id)
+            for res in result
+        ]
+        return {'searches': searches}

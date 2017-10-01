@@ -99,6 +99,7 @@ async def test_db_get_child_comments(conn, init_a_few_db_entries):
     comments = await db_get_child_comments(conn, 1)
     comment_texts = [c.text for c in comments]
     assert (
+        len(comment_texts) == 2 and
         'new comment by dima' in comment_texts and
         'dima commented some comment' in comment_texts
     )
@@ -117,21 +118,30 @@ async def test_db_get_child_comments_not_found(conn, init_a_few_db_entries):
 
 @pytest.mark.asyncio
 async def test_db_get_full_tree(conn, init_a_few_db_entries):
-    """"""
-    assert 0
+    """Test that the full tree of comments gets returned."""
+    comments = await db_get_full_tree(conn, 1)
+    comment_texts = [c.text for c in comments]
+    assert (
+        len(comment_texts) == 3 and
+        'some post' in comment_texts and
+        'new comment by dima' in comment_texts and
+        'dima commented some comment' in comment_texts
+    )
 
 
 @pytest.mark.asyncio
 async def test_db_get_full_tree_not_found(conn, init_a_few_db_entries):
     """"""
-    assert 0
+    with pytest.raises(RecordNotFound):
+        await db_get_full_tree(conn, 7)
 
 
 @pytest.mark.asyncio
 async def test_db_get_deleted_text(conn, init_a_few_db_entries):
-    """Test that all child comments get returned, including root one."""
-    # TODO: add user to the query and add test for it
-    assert 0
+    """Test deleted text is returned for a given entity."""
+    await db_delete_comment(conn, 'user1', 3)
+    text = await db_get_deleted_text(conn, 'user1', 3)
+    assert text == 'new comment by dima'
 
 
 @pytest.mark.asyncio
@@ -149,7 +159,7 @@ async def test_db_get_history_not_found(conn, init_a_few_db_entries):
     when no history were found.
     """
     with pytest.raises(RecordNotFound):
-        await db_get_history(conn, 'user1', None, None, 7)
+        await db_get_history(conn, 'user1', None, None, 2)
 
 
 @pytest.mark.asyncio

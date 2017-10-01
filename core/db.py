@@ -6,7 +6,6 @@ aiopg SELECT operation returns `list` of results
 https://github.com/aio-libs/aiopg/blob/master/aiopg/sa/result.py#L366
 which might cost much memory, use it carefully.
 """
-# TODO: db injection handling
 
 from datetime import datetime
 
@@ -150,8 +149,10 @@ async def db_create_comment(conn, username, text, entity_id):
     """Create a new comment for a given entity."""
     try:
         await conn.execute(
-            "INSERT INTO comments (type, creator, user_last_modified, text, parent_id)"
-            "VALUES ('comment', %s, %s, %s, %s);",
+            """
+            INSERT INTO comments (type, creator, user_last_modified, text, parent_id)
+            VALUES ('comment', %s, %s, %s, %s);
+            """,
             (username, username, text, entity_id)
         )
     except:
@@ -208,7 +209,6 @@ async def db_delete_comment(conn, user, comment_id):
     Essentially, comment is NOT deleted(allowing further restore.)
     Thus, text is set to null.
     """
-    # TODO cant delete if there're children
     result = await conn.execute(
         """
         UPDATE comments
@@ -266,15 +266,15 @@ async def db_get_deleted_text(conn, user, entity_id):
     """
     result = await conn.execute(
         """
-        SELECT * FROM history
-        WHERE entity_id=%s AND action='delete' --and "user"=%s TODO add and test
+        SELECT h.text FROM history as h
+        WHERE h.entity_id=%s AND h.action='delete' and h.user=%s 
         ORDER BY date DESC limit 1
         """,
-        (user, entity_id)
+        (entity_id, user)
     )
     record = await result.first()
     if record:
-        return record
+        return record[0]
     else:
         raise RecordNotFound('Could not find deleted comment[id={}]'.format(entity_id))
 
@@ -285,16 +285,32 @@ async def db_get_history(conn, user, start_date, end_date, root_comment_id):
 
     Update search history for the further use.
     """
-    start_date_condition = "AND date >= '{}'::date".format(start_date) if start_date else ""
-    end_date_condition = "AND date <= '{}'::date".format(end_date) if end_date else ""
-    root_comment_condition = "AND entity_id={}".format(root_comment_id) if root_comment_id else ""
+    sql_values = [user]
+    if start_date:
+        start_date_condition = 'AND date >= %s::date'
+        sql_values.append(start_date)
+    else:
+        start_date_condition = ''
+    if end_date:
+        end_date_condition = 'AND date <= %s::date'
+        sql_values.append(end_date)
+    else:
+        end_date_condition = ''
+    if root_comment_id:
+        root_comment_condition = 'AND entity_id=%s'
+        sql_values.append(root_comment_id)
+    else:
+        root_comment_condition = ''
     result = await conn.execute(
-        """SELECT * FROM history WHERE "user"='{user}' {sdc} {edc} {rcc}""".format(
-            user=user,
+        """
+        SELECT * FROM history as h
+        WHERE h.user=%s {sdc} {edc} {rcc}        
+        """.format(
             sdc=start_date_condition,
             edc=end_date_condition,
             rcc=root_comment_condition
         ),
+        sql_values
     )
     records = await result.fetchall()
     await conn.execute(
@@ -312,10 +328,13 @@ async def db_get_history(conn, user, start_date, end_date, root_comment_id):
 async def db_get_search_history(conn, user):
     """Get list of comment searches for the given user."""
     result = await conn.execute(
-        """SELECT * from search_history WHERE "user"=%s""",
+        """
+        SELECT sh.user, sh.start_date, sh.end_date, sh.search_date, sh.root_comment_id
+        FROM search_history as sh WHERE sh.user=%s
+        """,
         (user,)
     )
     records = await result.fetchall()
     if not records:
-        raise RecordNotFound
+        raise RecordNotFound('No history was found for user {}'.format(user))
     return records
