@@ -1,21 +1,4 @@
-from views import (
-    create_comment,
-    index,
-    get_comments,
-    get_1lvl_comments,
-    change_comment,
-    delete_comment,
-    restore_comment,
-    get_child_comments,
-    create_comment_form,
-    change_comment_form,
-    delete_comment_form,
-    restore_comment_form,
-    get_history_form,
-    get_history,
-    show_search_history,
-   # redownload_search
-)
+from views import *
 
 
 def setup_routes(app):

@@ -2,11 +2,11 @@ version: '2'
 services:
 
   comments:
-    build: .
+    extends:
+      file: docker-compose.common.yml
+      service: base
     ports:
       - "8080:8080"
-    volumes:
-      - '.:/opt/comments/'
     command:
       - 'dockerize'
       - '-wait'
@@ -17,10 +17,10 @@ services:
       - db
 
   db:
-    build: db
+    build: dbtools
     ports:
       - '5432:5432'
     environment:
-      POSTGRES_USER: exness
-      POSTGRES_PASSWORD: exness
+      POSTGRES_USER: dmishin
+      POSTGRES_PASSWORD: dmishin
       POSTGRES_DB: comments_db

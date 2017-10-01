@@ -1,6 +1,6 @@
-FROM python:3.5-slim
+FROM python:3.6-slim
 
-RUN groupadd exness && useradd --create-home --home-dir /home/exness -g exness exness
+RUN groupadd dmishin && useradd --create-home --home-dir /home/dmishin -g dmishin dmishin
 RUN apt-get update && apt-get install -y wget
 
 # dockerize allows services to wait for each other
@@ -13,5 +13,5 @@ RUN wget https://github.com/jwilder/dockerize/releases/download/$DOCKERIZE_VERSI
 COPY . /opt/comments/
 RUN pip install -r /opt/comments/requirements.txt
 WORKDIR /opt/comments
-RUN chown -R exness /opt/comments
-USER exness
+RUN chown -R dmishin /opt/comments
+USER dmishin

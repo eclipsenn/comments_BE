@@ -1,0 +1,27 @@
+version: '2'
+services:
+
+  testing:
+    extends:
+      file: ../docker-compose.common.yml
+      service: base
+    command:
+      - 'dockerize'
+      - '-wait'
+      - 'tcp://test_db:5432'
+      - 'py.test'
+# to run specific testcase
+#      - 'tests/core/test_db.py'
+#      - '-k'
+#      - 'test_db_change_comment_fails'
+    depends_on:
+      - test_db
+
+  test_db:
+    build: ../dbtools
+    ports:
+      - '5432:5432'
+    environment:
+      POSTGRES_USER: dmishin
+      POSTGRES_PASSWORD: dmishin
+      POSTGRES_DB: test_comments_db

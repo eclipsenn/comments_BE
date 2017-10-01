@@ -1,3 +1,14 @@
+"""
+Module to interact with postgres DB.
+
+ORM can be supported by sqlalchemy. Performance is questionable though.
+aiopg SELECT operation returns `list` of results
+https://github.com/aio-libs/aiopg/blob/master/aiopg/sa/result.py#L366
+which might cost much memory, use it carefully.
+"""
+
+from datetime import datetime
+
 import aiopg.sa
 
 # TODO: ORM is not implemented but quite possible to be
@@ -95,8 +106,8 @@ class ExecuteException(Exception):
     """Custom exception for failed executions."""
 
 
-async def init_pg(app):
-    conf = app['config']['postgres']
+async def init_pg(app, env='dev'):
+    conf = app['config'][env]['postgres']
     engine = await aiopg.sa.create_engine(
         database=conf['database'],
         user=conf['user'],
@@ -154,7 +165,7 @@ async def db_create_comment(conn, username, text, entity_id):
 
 
 
-async def db_get_1lvl_comments(conn, entity_id, offset, limit):
+async def db_get_1lvl_comments(conn, entity_id, offset=0, limit=5):
     result = await conn.execute(
         """
         SELECT * FROM comments WHERE ancestor_id = %s
@@ -189,6 +200,7 @@ async def db_delete_comment(conn, user, comment_id):
     Essentially, comment is NOT deleted(allowing further restore.)
     Thus, text is set to null.
     """
+    # TODO cant delete if there're children
     result = await conn.execute(
         "UPDATE comments "
         "SET text=DEFAULT, date_last_modified = '{date}', user_last_modified='{user}' "
@@ -200,13 +212,13 @@ async def db_delete_comment(conn, user, comment_id):
         raise ExecuteException('Failed to delete the comment')
 
 
-async def db_get_child_comments(conn, entity_id, with_root):
-    db = 'entities' if with_root else 'comments'
+async def db_get_child_comments(conn, entity_id, with_root=False):
+    source = 'entities' if with_root else 'comments'
     column = 'id' if with_root else 'ancestor_id'
     result = await conn.execute("""
         WITH RECURSIVE r as (
             SELECT id, creator, date_created, date_last_modified, text, ancestor_id
-            FROM {db}
+            FROM {source}
             WHERE "{column}"='{entity_id}'
 
             UNION
@@ -216,7 +228,7 @@ async def db_get_child_comments(conn, entity_id, with_root):
             FROM r JOIN comments on comments.ancestor_id = r.id
         )
         SELECT * FROM r;
-    """.format(db=db, column=column, entity_id=entity_id))
+    """.format(source=source, column=column, entity_id=entity_id))
     comments_record = await result.fetchall()
     if comments_record:
         return comments_record
@@ -240,7 +252,7 @@ async def db_get_deleted_text(conn, user, entity_id):
 
 async def db_get_history(conn, user, start_date, end_date, root_comment_id):
     """
-    Fetch an xml file with history of comments.
+    Fetch a history of comments.
 
     Update search history for the further use.
     """
@@ -269,7 +281,7 @@ async def db_get_history(conn, user, start_date, end_date, root_comment_id):
 
 
 async def db_get_search_history(conn, user):
-    """Get list of comment searches for the fiven user."""
+    """Get list of comment searches for the given user."""
     result = await conn.execute(
         """SELECT * from search_history WHERE "user"=%s""",
         (user,)
@@ -278,3 +290,59 @@ async def db_get_search_history(conn, user):
     if not records:
         raise RecordNotFound
     return records
+
+
+### test code """"""""""""""""""""""""""""""""""""
+async def db_get_left_sibling(conn, entity):
+    """Get the left sibling of the given entity, defaults to None."""
+    result = await conn.execute(
+        "SELECT * FROM comments"
+        "WHERE comments.right + 1 = %s",
+        (entity.right,)
+    )
+    records = await result.fetchall()
+    if not records:
+        return None
+    elif len(records) > 1:
+        raise ExecuteException('More than one left sibling was returned.')
+    else:
+        return records[0]
+
+
+
+async def db_create_comment_v2(conn, username, text, entity_id):
+    """
+    Insert a new comment.
+
+    Since the nested-sets structure is used,
+    needs to insert left and right, which costs us a lot of inserts.
+    In order to prevent this, the optimisation was used as described
+    below:
+     - if entity has parent, then
+      -- if parent.right - parent.left < 0.01 * MAX_EXPECTED_COMMENTS_FOR_ENTITY
+         then REORDER_STRUCTURE;
+      -- else left=parent.left+1, right=parent.right-1
+     - if there's a left sibling, 
+       then left=sibling.right+1, right=MAX_EXPECTED_COMMENTS_FOR_ENTITY;
+     - else left=0 and right=MAX_EXPECTED_COMMENTS_FOR_ENTITY;
+    """
+    try:
+        result = await conn.execute(
+            "INSERT INTO comments (type,creator, user_last_modified, text,ancestor_id)"
+            "VALUES ('comment', '{username}', '{username}',  '{text}', '{ancestor_id}');".format(
+                username=username,
+                text=text,
+                ancestor_id=entity_id
+            )
+        )
+    except:
+        res = await conn.execute(
+            'SELECT * from entities limit 10'
+        )
+        entities = await res.fetchall()
+        raise ExecuteException(
+            'Failed to create the new comment, probably incorrect entity was provided.\n'
+            '10 valid entities:\n{}'.format(
+                ' '.join(str(e.id) for e in entities))
+        )
+    return result

@@ -1,32 +1,23 @@
-from aiohttp import web
-import aiohttp_jinja2
-import xml
-import json
 from datetime import datetime
 from math import ceil
+import json
+import xml
 
-from db import (
-    RecordNotFound,
-    ExecuteException,
-    db_get_comments,
-    db_get_1lvl_comments,
-    db_create_comment,
-    db_change_comment,
-    db_get_child_comments,
-    db_delete_comment,
-    db_get_deleted_text,
-    db_get_history,
-    db_get_search_history)
+from aiohttp import web
+import aiohttp_jinja2
+
+from db import *
+
 
 # TODO: different formats
 # TODO: db injection handling
 # TODO: docstrings
 # TODO: edge cases handling
+# TODO: switch to namedtuple
 
-
-class Comment():
-    def __init__(self, id, ancestor_id, text):
-        self.id = id
+class Comment:
+    def __init__(self, comment_id, ancestor_id, text):
+        self.id = comment_id
         self.ancestor_id = ancestor_id
         self.text = text
 
@@ -34,13 +25,12 @@ class Comment():
         return '(id={}, parent={},text={})'.format(self.id, self.ancestor_id, self.text)
 
 
-class Search():
+class Search:
     def __init__(self, search_date=None, start_date=None, end_date=None, root_comment_id=None):
         self.search_date = search_date
         self.start_date = start_date
         self.end_date = end_date
         self.root_comment_id = root_comment_id
-
 
 
 def compose_comment_tree(comments):
@@ -66,7 +56,6 @@ def compose_comment_tree(comments):
         if not changed:
             tmp[c] = {}
     return tmp
-
 
 
 @aiohttp_jinja2.template('index.html')
@@ -108,7 +97,7 @@ async def create_comment(request):
     user = request.match_info['user']
     async with request.app['db'].acquire() as conn:
         try:
-            result = await db_create_comment(conn, user, text, entity_id)
+            await db_create_comment(conn, user, text, entity_id)
         except ExecuteException as e:
             raise web.HTTPInternalServerError(text=str(e))
         return web.Response(text='added a comment: {}!'.format(text))
@@ -146,7 +135,7 @@ async def get_1lvl_comments(request):
                 conn, entity_id, offset=offset, limit=limit)
         except RecordNotFound as e:
             raise web.HTTPNotFound(text=str(e))
-        chunks = ceil(len(comments) / pagination)
+        chunks = int(ceil(len(comments) / pagination))
         data = {
             max(0, page_num - 3) + i + 1: comments[i * pagination:(i + 1) * pagination]
             for i in range(chunks)
@@ -175,10 +164,9 @@ async def change_comment(request):
         raise web.HTTPBadRequest(text='text is missing')
     async with request.app['db'].acquire() as conn:
         try:
-            result = await db_change_comment(conn, user, comment_id, text)
-        except ExecuteException:
-            raise web.HTTPInternalServerError(
-                text='Oops, something went wrong.')
+            await db_change_comment(conn, user, comment_id, text)
+        except ExecuteException as e:
+            raise web.HTTPInternalServerError(text=str(e))
         return web.Response(
             text='new comment with id={id} was set to "{text}"'.format(
                 id=comment_id, text=text)
@@ -224,13 +212,14 @@ async def restore_comment(request):
     async with request.app['db'].acquire() as conn:
         try:
             text = await db_get_deleted_text(conn, user, comment_id)
-            result = await db_change_comment(conn, user, comment_id, text.text)
+            await db_change_comment(conn, user, comment_id, text.text)
         except (RecordNotFound, ExecuteException) as e:
             raise web.HTTPInternalServerError(text=str(e))
         return web.Response(
             text='comment[id={id}] was restored[text={text}]'.format(
                 id=comment_id, text=text.text)
         )
+
 
 async def get_child_comments(request):
     """Get child comments tree for the given comment ID."""
@@ -242,8 +231,7 @@ async def get_child_comments(request):
         try:
             comments = await db_get_child_comments(conn, entity_id, with_root)
         except ExecuteException as e:
-            raise web.HTTPInternalServerError(
-                text='Oops, something went wrong.')
+            raise web.HTTPInternalServerError(text=str(e))
         except RecordNotFound as e:
             raise web.HTTPNotFound(text=str(e))
 
