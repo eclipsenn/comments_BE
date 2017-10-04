@@ -82,6 +82,25 @@ async def test_db_change_comment(conn, init_a_few_db_entries):
 
 
 @pytest.mark.asyncio
+async def test_db_change_comment_not_found(conn, init_a_few_db_entries):
+    """Test that ExecutionException is raised if no cooment found."""
+    with pytest.raises(ExecuteException):
+        await db_change_comment(conn, 'user1', 7, 'Dima changed comment')
+
+
+@pytest.mark.asyncio
+async def test_db_delete_comment(conn, init_a_few_db_entries):
+    """
+    Test that comment gets removed properly.
+
+    Basically, removing just sets text to None.
+    """
+    await db_delete_comment(conn, 'user1', 3)
+    comments = await db_get_comments(conn, 'user1')
+    assert [c.text for c in comments if c.id == 3] == [None]
+
+
+@pytest.mark.asyncio
 async def test_db_delete_comment(conn, init_a_few_db_entries):
     """Test that comment gets removed properly."""
     await db_delete_comment(conn, 'user1', 3)

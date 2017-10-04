@@ -188,18 +188,18 @@ async def db_get_1lvl_comments(conn, entity_type, entity_id, offset=0, limit=5):
 
 
 async def db_change_comment(conn, user, comment_id, text):
-    try:
-        result = await conn.execute(
-            """
-            UPDATE comments
-            SET text=%s, date_last_modified = %s, user_last_modified=%s
-            WHERE id=%s
-            """,
-            (text, datetime.now(), user, comment_id)
-        )
-    except:
-        raise ExecuteException('Failed to change the comment')
-    return result
+    """Change comment for the given id."""
+    result = await conn.execute(
+        """
+        UPDATE comments
+        SET text=%s, date_last_modified = %s, user_last_modified=%s
+        WHERE id=%s
+        RETURNING *
+        """,
+        (text, datetime.now(), user, comment_id)
+    )
+    if not result.rowcount:
+        raise ExecuteException('Failed to change the comment, check whether it exists.')
 
 
 async def db_delete_comment(conn, user, comment_id):
