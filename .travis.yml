@@ -13,3 +13,5 @@ after_script:
   - docker-compose -f tests/docker-compose.test.yml down
 
 language: python
+python:
+  - "3.6"
