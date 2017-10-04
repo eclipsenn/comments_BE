@@ -10,7 +10,6 @@ services:
       - '-wait'
       - 'tcp://test_db:5432'
       - 'py.test'
-      - '--cov=core'
 # to run specific testcase
 #      - 'tests/core/test_db.py'
 #      - '-k'
