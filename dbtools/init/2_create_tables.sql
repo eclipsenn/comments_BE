@@ -43,7 +43,7 @@ CREATE TABLE "entities" (
 
 
 DROP TABLE IF EXISTS entities_closure_table CASCADE;
-CREATE TABLE entities_closure_table (
+CREATE TABLE "entities_closure_table" (
     "id" serial PRIMARY KEY,
     "ancestor_id" INTEGER REFERENCES "entities"("id"),
     "descendant_id" INTEGER REFERENCES "entities"("id")
@@ -62,19 +62,19 @@ CREATE TABLE "history" (
 );
 
 DROP VIEW IF EXISTS comments;
-CREATE VIEW comments AS
+CREATE VIEW "comments" AS
   SELECT * from entities
     WHERE type='comment';
 
 
 DROP VIEW IF EXISTS posts;
-CREATE VIEW comments AS
+CREATE VIEW "posts" AS
   SELECT * from entities
     WHERE type='post';
 
 
 DROP VIEW IF EXISTS pages;
-CREATE VIEW comments AS
+CREATE VIEW "pages" AS
   SELECT * from entities
     WHERE type='page';
 
