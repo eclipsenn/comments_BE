@@ -1,0 +1,13 @@
+sudo: required
+services:
+  - docker
+
+env:
+  COMPOSE_VERSION: 1.4.1
+
+script:
+  - docker-compose build
+  - docker-compose -f tests/docker-compose.test.yml up
+
+after_script:
+  - docker-compose -f tests/docker-compose.test.yml down
