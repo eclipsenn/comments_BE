@@ -7,6 +7,10 @@
 <body>
 <p>Create the new comment</p>
 <form method="post">
+    <select name="entity_type">
+        <option value="post">post</option>
+        <option value="comment">comment</option>
+    </select>
     <label for="entity_id">entity_id</label>
     <input id="entity_id" name="entity_id" type="text" value="" autofocus/>
     <label for="text">text</label>

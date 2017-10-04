@@ -11,8 +11,6 @@ def setup_routes(app):
     app.router.add_post('/{user}/change_comment', change_comment)
     app.router.add_get('/{user}/delete_comment', delete_comment_form)
     app.router.add_post('/{user}/delete_comment', delete_comment)
-    app.router.add_get('/{user}/restore_comment', restore_comment_form)
-    app.router.add_post('/{user}/restore_comment', restore_comment)
     app.router.add_get('/{user}/get_children', get_child_comments)
     app.router.add_get('/{user}/get_full_tree', get_full_tree)
     app.router.add_get('/{user}/get_history', get_history_form)

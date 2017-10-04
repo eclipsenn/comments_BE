@@ -26,12 +26,12 @@ becomes a list. Fortunately, it's a very rare case for comments, so
 we take it :)
 Referential integrity of closure table is handled by trigger functions
 at DB level(on-create).
-Since one can not remove a comment if it has children, the removing is
-designed as setting comment's text to None. This allows simple restoring 
-if needed without any overhead.
 
-For simplicity, every entity which user can create(post, page, comment) are
-stored in one table, with convenient views to access by type.
+UPD. Changed DB structure so it's an abstract `entities_metadata` table and
+two inherited - `comments` and `posts`(it could be more, e.g. user page).
+Referential integrity is reached by more triggers again.
+This allows to split entities logically and more explicit and simple operations
+with tables.
 
 installation & running
 ----------------------

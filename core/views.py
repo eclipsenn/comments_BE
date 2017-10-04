@@ -11,7 +11,7 @@ import aiohttp_jinja2
 from db import *
 
 
-Search = namedtuple('Search', ('search_date', 'start_date', 'end_date', 'root_comment_id'))
+Search = namedtuple('Search', ('search_date', 'start_date', 'end_date', 'root_entity_id'))
 Action = namedtuple('Action', ('entity_id', 'user', 'action', 'date', 'text'))
 
 
@@ -50,11 +50,12 @@ async def create_comment(request):
     """Create comment for the given entity."""
     data = await request.post()
     text = data['text']
+    entity_type = data['entity_type']
     entity_id = data['entity_id']
     user = request.match_info['user']
     async with request.app['db'].acquire() as conn:
         try:
-            await db_create_comment(conn, user, text, entity_id)
+            await db_create_comment(conn, user, text, entity_type, entity_id)
         except ExecuteException as e:
             raise web.HTTPInternalServerError(text=str(e))
         return web.Response(text='added a comment: {}!'.format(text))
@@ -80,6 +81,7 @@ async def get_1lvl_comments(request):
     Show links to 2 previous and 2 next pages.
     """
     pagination = 5
+    entity_type = request.rel_url.query.get('entity_type')
     entity_id = request.rel_url.query.get('entity_id')
     if not entity_id:
         raise web.HTTPBadRequest(text='entity_id is missing')
@@ -89,7 +91,7 @@ async def get_1lvl_comments(request):
     async with request.app['db'].acquire() as conn:
         try:
             comments = await db_get_1lvl_comments(
-                conn, entity_id, offset=offset, limit=limit)
+                conn, entity_type, entity_id, offset=offset, limit=limit)
         except RecordNotFound as e:
             raise web.HTTPNotFound(text=str(e))
         chunks = int(ceil(len(comments) / pagination))
@@ -98,6 +100,7 @@ async def get_1lvl_comments(request):
             for i in range(chunks)
         }
         return {
+            'entity_type': entity_type,
             'entity_id': entity_id,
             'page': page_num,
             'user': request.match_info['user'],
@@ -131,53 +134,20 @@ async def change_comment(request):
 
 
 async def delete_comment(request):
-    """
-    Delete comment for the given comment ID.
-
-    Currently any user can delete since auth is not implemented.
-    """
+    """Delete comment for the given comment ID."""
     data = await request.post()
     comment_id = data.get('comment_id')
     user = request.match_info['user']
     if not comment_id:
         raise web.HTTPBadRequest(text='comment id is missing')
     async with request.app['db'].acquire() as conn:
-        try:
-            await db_get_1lvl_comments(conn, comment_id)
-        except RecordNotFound:
-            pass
-        else:
-            return web.HTTPBadRequest(text='Cannot delete if the comment has children')
         try:
             await db_delete_comment(conn, user, comment_id)
         except ExecuteException:
             raise web.HTTPInternalServerError(
-                text='Oops, something went wrong.')
+                text='Failed to delete the comment, check whether it has children.')
         return web.Response(
             text='comment[id={id}] was deleted"'.format(id=comment_id)
-        )
-
-
-async def restore_comment(request):
-    """
-    Restore comment for the given comment ID.
-
-    Currently any user can restore since auth is not implemented.
-    """
-    data = await request.post()
-    comment_id = data.get('comment_id')
-    user = request.match_info['user']
-    if not comment_id:
-        raise web.HTTPBadRequest(text='comment id is missing')
-    async with request.app['db'].acquire() as conn:
-        try:
-            text = await db_get_deleted_text(conn, user, comment_id)
-            await db_change_comment(conn, user, comment_id, text)
-        except (RecordNotFound, ExecuteException) as e:
-            raise web.HTTPInternalServerError(text=str(e))
-        return web.Response(
-            text='comment[id={id}] was restored[text={text}]'.format(
-                id=comment_id, text=text.text)
         )
 
 
@@ -199,12 +169,13 @@ async def get_child_comments(request):
 
 async def get_full_tree(request):
     """Get child comments tree for the given comment ID."""
+    root_type = request.rel_url.query.get('root_type')
     root_id = request.rel_url.query.get('root_id')
     if not root_id:
         raise web.HTTPBadRequest(text='root_id is missing')
     async with request.app['db'].acquire() as conn:
         try:
-            comments = await db_get_full_tree(conn, root_id)
+            comments = await db_get_full_tree(conn, root_type, root_id)
         except ExecuteException as e:
             raise web.HTTPInternalServerError(text=str(e))
         except RecordNotFound as e:
@@ -233,7 +204,7 @@ async def get_history(request):
     """
     data = await request.post()
     user = request.match_info['user']
-    root_comment_id = data.get('comment_id') or None
+    root_entity_id = data.get('comment_id') or None
     download_format = data['download_format']
     start_date = data.get('start_date')
     if start_date in ('', 'None'):
@@ -243,7 +214,7 @@ async def get_history(request):
         end_date = None
     try:
         async with request.app['db'].acquire() as conn:
-            result = await db_get_history(conn, user, start_date, end_date, root_comment_id)
+            result = await db_get_history(conn, user, start_date, end_date, root_entity_id)
     except RecordNotFound as e:
         return web.Response(text=str(e))
     actions = [
@@ -288,7 +259,7 @@ async def get_search_history(request):
         except RecordNotFound as e:
             raise web.HTTPNotFound(text=str(e))
         searches = [
-            Search(res.search_date, res.start_date, res.end_date, res.root_comment_id)
+            Search(res.search_date, res.start_date, res.end_date, res.root_entity_id)
             for res in result
         ]
         return {'searches': searches}

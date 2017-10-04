@@ -37,7 +37,7 @@ async def test_db_get_comments_not_found(conn, init_a_few_db_entries):
 @pytest.mark.asyncio
 async def test_db_create_comment(conn, init_a_few_db_entries):
     """Test that a comment is added for an existing user-entity pair."""
-    await db_create_comment(conn, 'user2', 'Yana made test', 1)
+    await db_create_comment(conn, 'user2', 'Yana made test', 'comment', 1)
     comments = await db_get_comments(conn, 'user2')
     assert any(map(lambda x: 'Yana made test' in x.text, comments))
 
@@ -50,14 +50,14 @@ async def test_db_create_comment_parent_not_found(conn, init_a_few_db_entries):
     This is 7th row, so entity_id = 8 shouldn't exist.
     """
     with pytest.raises(ExecuteException):
-        await db_create_comment(conn, 'user2', 'Fake parent entity', 8)
+        await db_create_comment(conn, 'user2', 'Fake parent entity', 'post', 3)
 
 
 @pytest.mark.asyncio
 async def test_db_get_1lvl_comments(conn, init_a_few_db_entries):
     """ Test that all first-level comments get returned."""
-    await db_create_comment(conn, 'user1', 'Dima made lvl1 comment', 2)
-    comments = await db_get_1lvl_comments(conn, 2)
+    await db_create_comment(conn, 'user1', 'Dima made lvl1 comment', 'comment', 2)
+    comments = await db_get_1lvl_comments(conn, 'comment', 2)
     assert any(map(lambda x: 'Dima made lvl1 comment' in x.text, comments))
 
 
@@ -69,7 +69,7 @@ async def test_db_get_lvl1_comments_not_found(conn, init_a_few_db_entries):
     when no lvl comments found.
     """
     with pytest.raises(RecordNotFound):
-        await db_get_1lvl_comments(conn, 5)
+        await db_get_1lvl_comments(conn, 'comment', 3)
 
 
 @pytest.mark.asyncio
@@ -83,14 +83,17 @@ async def test_db_change_comment(conn, init_a_few_db_entries):
 
 @pytest.mark.asyncio
 async def test_db_delete_comment(conn, init_a_few_db_entries):
-    """
-    Test that comment gets removed properly.
-
-    Basically, removing just sets text to None.
-    """
+    """Test that comment gets removed properly."""
     await db_delete_comment(conn, 'user1', 3)
     comments = await db_get_comments(conn, 'user1')
-    assert [c.text for c in comments if c.id == 3] == [None]
+    assert [c.text for c in comments if c.id == 3] == []
+
+
+@pytest.mark.asyncio
+async def test_db_delete_comment_has_children(conn, init_a_few_db_entries):
+    """ Test that ExecutionException is raised if comment has children."""
+    with pytest.raises(ExecuteException):
+        await db_delete_comment(conn, 'user1', 1)
 
 
 @pytest.mark.asyncio
@@ -99,8 +102,7 @@ async def test_db_get_child_comments(conn, init_a_few_db_entries):
     comments = await db_get_child_comments(conn, 1)
     comment_texts = [c.text for c in comments]
     assert (
-        len(comment_texts) == 2 and
-        'new comment by dima' in comment_texts and
+        len(comment_texts) == 1 and
         'dima commented some comment' in comment_texts
     )
 
@@ -119,7 +121,7 @@ async def test_db_get_child_comments_not_found(conn, init_a_few_db_entries):
 @pytest.mark.asyncio
 async def test_db_get_full_tree(conn, init_a_few_db_entries):
     """Test that the full tree of comments gets returned."""
-    comments = await db_get_full_tree(conn, 1)
+    comments = await db_get_full_tree(conn, 'post', 1)
     comment_texts = [c.text for c in comments]
     assert (
         len(comment_texts) == 3 and
@@ -133,22 +135,14 @@ async def test_db_get_full_tree(conn, init_a_few_db_entries):
 async def test_db_get_full_tree_not_found(conn, init_a_few_db_entries):
     """"""
     with pytest.raises(RecordNotFound):
-        await db_get_full_tree(conn, 7)
-
-
-@pytest.mark.asyncio
-async def test_db_get_deleted_text(conn, init_a_few_db_entries):
-    """Test deleted text is returned for a given entity."""
-    await db_delete_comment(conn, 'user1', 3)
-    text = await db_get_deleted_text(conn, 'user1', 3)
-    assert text == 'new comment by dima'
+        await db_get_full_tree(conn, 'comment', 5)
 
 
 @pytest.mark.asyncio
 async def test_db_get_history(conn, init_a_few_db_entries):
     """Test that history gets returned correctly."""
     results = await db_get_history(conn, 'user1', None, None, 3)
-    assert [r.action for r in results] == ['create']
+    assert [(r.text, r.action) for r in results] == [('dima commented some comment', 'create')]
 
 
 @pytest.mark.asyncio
@@ -171,7 +165,7 @@ async def test_db_get_search_history(conn, init_a_few_db_entries):
     """
     await db_get_history(conn, 'user1', None, None, 3)
     results = await db_get_search_history(conn, 'user1')
-    assert [(r.user, r.root_comment_id) for r in results] == [('user1', 3)]
+    assert [(r.user, r.root_entity_id) for r in results] == [('user1', 3)]
 
 
 @pytest.mark.asyncio

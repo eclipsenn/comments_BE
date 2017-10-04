@@ -145,15 +145,15 @@ async def db_get_comments(conn, username):
         raise RecordNotFound('No comments found for  user {}'.format(username))
 
 
-async def db_create_comment(conn, username, text, entity_id):
+async def db_create_comment(conn, username, text, entity_type, entity_id):
     """Create a new comment for a given entity."""
     try:
         await conn.execute(
             """
-            INSERT INTO comments (type, creator, user_last_modified, text, parent_id)
-            VALUES ('comment', %s, %s, %s, %s);
+            INSERT INTO comments (type, creator, user_last_modified, text, parent_type, parent_id)
+            VALUES ('comment', %s, %s, %s, %s, %s);
             """,
-            (username, username, text, entity_id)
+            (username, username, text, entity_type, entity_id)
         )
     except:
         res = await conn.execute(
@@ -162,11 +162,11 @@ async def db_create_comment(conn, username, text, entity_id):
         entities = await res.fetchall()
         raise ExecuteException(
             'Failed to create the new comment, probably incorrect entity was provided.\n'
-            '10 valid entities:\n{}'.format(' '.join(str(e.id) for e in entities))
+            '10 valid entities:\n{}'.format(' '.join('{}:{}'.format(e.type, str(e.id)) for e in entities))
         )
 
 
-async def db_get_1lvl_comments(conn, entity_id, offset=0, limit=5):
+async def db_get_1lvl_comments(conn, entity_type, entity_id, offset=0, limit=5):
     """
     Get all first-level children for the given entity,
 
@@ -174,11 +174,11 @@ async def db_get_1lvl_comments(conn, entity_id, offset=0, limit=5):
     """
     result = await conn.execute(
         """
-        SELECT * FROM comments WHERE parent_id = %s
+        SELECT * FROM comments WHERE parent_type = %s AND parent_id = %s
         OFFSET %s LIMIT %s
 
         """,
-        (entity_id, offset, limit)
+        (entity_type, entity_id, offset, limit)
     )
     comments_record = await result.fetchall()
     if comments_record:
@@ -188,18 +188,18 @@ async def db_get_1lvl_comments(conn, entity_id, offset=0, limit=5):
 
 
 async def db_change_comment(conn, user, comment_id, text):
-    result = await conn.execute(
-        """
-        UPDATE comments
-        SET text=%s, date_last_modified = %s, user_last_modified=%s
-        WHERE id=%s
-        """,
-        (text, datetime.now(), user, comment_id)
-    )
     try:
-        return result
+        result = await conn.execute(
+            """
+            UPDATE comments
+            SET text=%s, date_last_modified = %s, user_last_modified=%s
+            WHERE id=%s
+            """,
+            (text, datetime.now(), user, comment_id)
+        )
     except:
         raise ExecuteException('Failed to change the comment')
+    return result
 
 
 async def db_delete_comment(conn, user, comment_id):
@@ -209,26 +209,28 @@ async def db_delete_comment(conn, user, comment_id):
     Essentially, comment is NOT deleted(allowing further restore.)
     Thus, text is set to null.
     """
-    result = await conn.execute(
-        """
-        UPDATE comments
-        SET text=DEFAULT, date_last_modified = %s, user_last_modified=%s
-        WHERE id=%s""",
-        (datetime.now(), user, comment_id)
-    )
     try:
-        return result
+        await conn.execute(
+            """
+            DELETE FROM comments
+            WHERE creator=%s and id=%s""",
+            (user, comment_id)
+        )
     except:
-        raise ExecuteException('Failed to delete the comment')
+        raise ExecuteException('Failed to delete the comment, check whether it has children.')
 
 
 async def db_get_child_comments(conn, entity_id):
-    """Get a list of children comments for a given entity."""
+    """
+    Get a list of children comments for a given comment.
+
+    Parent ID is returned to be able to recreate the tree on client.
+    """
     result = await conn.execute(
         """
         SELECT S.id, S.creator, S.date_created, S.date_last_modified, S.text, S.parent_id
-        FROM comments as S JOIN entities_closure_table as CT on S.id = CT.descendant_id 
-        WHERE CT.ancestor_id=%s AND CT.descendant_id !=%s;
+        FROM comments as S JOIN entities_closure_table as CT on S.id = CT.descendant_id
+        WHERE CT.ancestor_type='comment' AND CT.ancestor_id=%s AND CT.descendant_id !=%s;
         """,
         (entity_id, entity_id)
     )
@@ -239,15 +241,19 @@ async def db_get_child_comments(conn, entity_id):
         raise RecordNotFound('No comments found for entity {}'.format(entity_id))
 
 
-async def db_get_full_tree(conn, root_id):
-    """Get a full tree of comments for a given root."""
+async def db_get_full_tree(conn, root_type, root_id):
+    """
+    Get a full tree of comments for a given root.
+
+    Parent ID is returned to be able to recreate the tree on client.
+    """
     result = await conn.execute(
         """
         SELECT S.id, S.creator, S.date_created, S.date_last_modified, S.text, S.parent_id
-        FROM entities as S JOIN entities_closure_table as CT on S.id = CT.descendant_id 
-        WHERE CT.ancestor_id=%s;
+        FROM entities_metadata as S JOIN entities_closure_table as CT on S.id = CT.descendant_id and S.type=CT.descendant_type
+        WHERE CT.ancestor_type=%s AND CT.ancestor_id=%s;
         """,
-        (root_id,)
+        (root_type, root_id)
     )
     comments_record = await result.fetchall()
     if comments_record:
@@ -256,30 +262,7 @@ async def db_get_full_tree(conn, root_id):
         raise RecordNotFound('No tree found for root {}'.format(root_id))
 
 
-
-async def db_get_deleted_text(conn, user, entity_id):
-    """
-    Get removed text for a given entity.
-
-    Since comments are not essentially removed(only test),
-    it's possible to get text to restore later.
-    """
-    result = await conn.execute(
-        """
-        SELECT h.text FROM history as h
-        WHERE h.entity_id=%s AND h.action='delete' and h.user=%s 
-        ORDER BY date DESC limit 1
-        """,
-        (entity_id, user)
-    )
-    record = await result.first()
-    if record:
-        return record[0]
-    else:
-        raise RecordNotFound('Could not find deleted comment[id={}]'.format(entity_id))
-
-
-async def db_get_history(conn, user, start_date, end_date, root_comment_id):
+async def db_get_history(conn, user, start_date, end_date, root_entity_id):
     """
     Fetch a history of comments.
 
@@ -296,15 +279,15 @@ async def db_get_history(conn, user, start_date, end_date, root_comment_id):
         sql_values.append(end_date)
     else:
         end_date_condition = ''
-    if root_comment_id:
+    if root_entity_id:
         root_comment_condition = 'AND entity_id=%s'
-        sql_values.append(root_comment_id)
+        sql_values.append(root_entity_id)
     else:
         root_comment_condition = ''
     result = await conn.execute(
         """
         SELECT * FROM history as h
-        WHERE h.user=%s {sdc} {edc} {rcc}        
+        WHERE h.entity_type='comment' AND h.user=%s {sdc} {edc} {rcc}        
         """.format(
             sdc=start_date_condition,
             edc=end_date_condition,
@@ -314,10 +297,10 @@ async def db_get_history(conn, user, start_date, end_date, root_comment_id):
     )
     records = await result.fetchall()
     await conn.execute(
-        """INSERT INTO search_history("user", "start_date", "end_date", "root_comment_id")
-           VALUES (%s, %s, %s, %s)
+        """INSERT INTO search_history("user", "start_date", "end_date", "root_entity_type", "root_entity_id")
+           VALUES (%s, %s, %s, 'comment', %s)
         """,
-        (user, start_date, end_date, root_comment_id)
+        (user, start_date, end_date, root_entity_id)
     )
 
     if not records:
@@ -329,7 +312,7 @@ async def db_get_search_history(conn, user):
     """Get list of comment searches for the given user."""
     result = await conn.execute(
         """
-        SELECT sh.user, sh.start_date, sh.end_date, sh.search_date, sh.root_comment_id
+        SELECT sh.user, sh.start_date, sh.end_date, sh.search_date, sh.root_entity_id
         FROM search_history as sh WHERE sh.user=%s
         """,
         (user,)

@@ -8,7 +8,7 @@
 <h1> First level children</h1>
 Pages:
 {% for s in data%}
-<a href="{{url('lvl1', user=user, query_={'page': s, 'entity_id': entity_id}) }}"> {{s}}</a>
+<a href="{{url('lvl1', user=user, query_={'page': s, 'entity_type': entity_type, 'entity_id': entity_id}) }}"> {{s}}</a>
 {%endfor%}
 {% for comment in data[page] %}
 <p>{{comment}}</p>
