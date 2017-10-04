@@ -18,7 +18,7 @@ config = {
             'user': 'dmishin',
             'password': 'dmishin',
             'host': '192.168.99.100',
-            'port': 5432,
+            'port': 54333,
             'minsize': 1,
             'maxsize': 5,
         },
