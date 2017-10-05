@@ -143,9 +143,8 @@ async def delete_comment(request):
     async with request.app['db'].acquire() as conn:
         try:
             await db_delete_comment(conn, user, comment_id)
-        except ExecuteException:
-            raise web.HTTPInternalServerError(
-                text='Failed to delete the comment, check whether it has children.')
+        except ExecuteException as e:
+            raise web.HTTPInternalServerError(text=str(e))
         return web.Response(
             text='comment[id={id}] was deleted"'.format(id=comment_id)
         )

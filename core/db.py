@@ -210,14 +210,18 @@ async def db_delete_comment(conn, user, comment_id):
     Thus, text is set to null.
     """
     try:
-        await conn.execute(
+        result = await conn.execute(
             """
             DELETE FROM comments
-            WHERE creator=%s and id=%s""",
+            WHERE creator=%s and id=%s
+            RETURNING *
+            """,
             (user, comment_id)
         )
     except:
         raise ExecuteException('Failed to delete the comment, check whether it has children.')
+    if not result.rowcount:
+        raise ExecuteException('Failed to change the comment, check whether it exists.')
 
 
 async def db_get_child_comments(conn, entity_id):
