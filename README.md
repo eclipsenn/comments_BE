@@ -53,5 +53,6 @@ To run tests, run
 
     docker-compose -f tests/docker-compose.test.yml up
     
-Tests are run on the same port, so be sure you either use different
-hosts for dev/test or stop dev containers before run test ones.
+Database remains up after tests, so it's needed to stop/remove the container afterwards:
+
+    docker-compose -f tests/docker-compose.test.yml down
